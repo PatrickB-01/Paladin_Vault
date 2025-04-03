@@ -33,3 +33,13 @@ derive_result = cp.derive_key(password,load_result[1])
 new_hash = derive_result[1]
 print("Key: ",cp.base64.b64encode(derive_result[0]))
 print("Key len: ",len(derive_result[0]))
+
+
+# Encryption
+
+teststr = "this is a test"
+print("Original:",teststr)
+nonce , ciphertext, tag = cp.encrypt(teststr.encode(),derive_result[0])
+
+byte_decrypted = cp.decrypt(key=derive_result[0],ciphertext=ciphertext,nonce=nonce,tag=tag)
+print("Result:",byte_decrypted.decode())

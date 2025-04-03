@@ -4,6 +4,10 @@ import argon2
 from Backend.CryptoUtils.CryptoPaladinExceptions import SaltLengthException
 import logging
 import base64
+from Crypto.Cipher import AES
+
+
+
 # Utility functions for encryption, decryption and key generation
 
 
@@ -26,7 +30,6 @@ def generate_key(input:str, salt:bytes = None) -> tuple[str,bytes]:
     # Derive key using Argon2id (salt is prepended internally)
     derived_key:str = ph.hash(input ,salt=salt)
     return (derived_key,salt)
-
 
 
 def save_key(key:str, salt:bytes, key_file:str) -> None:
@@ -67,3 +70,27 @@ def derive_key(input:str,salt:bytes) -> tuple[bytes,str]:
     hash = argon2_values[-1]
     hash_bytes = base64.b64decode(hash+'==') # added padding because python is weird
     return (hash_bytes,hash_result)
+
+# Encryption
+
+def encrypt(plaintext:bytes, key:bytes) -> tuple[bytes,bytes,bytes]:
+    '''
+    Encrypts the plaintext using AES in GCM mode and returns  tuple[nonce , ciphertext , tag]
+    '''
+    # Generate a random 16-byte nonce
+    nonce = os.urandom(16)
+    # Create AES cipher in GCM mode
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    # Encrypt the plaintext
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    return nonce, ciphertext, tag
+
+def decrypt(key:bytes, ciphertext:bytes, nonce:bytes, tag:bytes):
+    '''
+    Decrypts the ciphertext using AES in GCM mode and verifies the MAC/TAG for integrity check
+    '''
+    # Create AES cipher in GCM mode with the same nonce
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    # Decrypt the ciphertext
+    plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+    return plaintext
