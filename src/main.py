@@ -1,10 +1,10 @@
 from Backend.CryptoUtils import CryptoPaladin as cp
 import logging
-
+from Backend.Repository.SQLiteRepository import SQLiteRepository
 # To-Do configure logging
 LOGFILE = r"D:\MyFiles\side_projects\PythonPassManager\logs\PaladinVaultLogs.log"
 KEYFILE = r"D:\MyFiles\side_projects\PythonPassManager\testdir\key.bin"
-
+DB = r"D:\MyFiles\side_projects\PythonPassManager\testdir\Passwords.db"
 
 logging.basicConfig(
     filename=LOGFILE,
@@ -43,3 +43,10 @@ nonce , ciphertext, tag = cp.encrypt(teststr.encode(),derive_result[0])
 
 byte_decrypted = cp.decrypt(key=derive_result[0],ciphertext=ciphertext,nonce=nonce,tag=tag)
 print("Result:",byte_decrypted.decode())
+
+# database
+
+mydb = SQLiteRepository(maindb_path=DB,key=derive_result[0])
+
+mydb.create_password_entry(service="test service",username="tester",password=ciphertext,nonce=nonce,tag=tag,link="google.com",note="testing")
+pss = mydb.get_all_passwords()

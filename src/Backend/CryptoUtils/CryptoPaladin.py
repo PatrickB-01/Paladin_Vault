@@ -75,22 +75,22 @@ def derive_key(input:str,salt:bytes) -> tuple[bytes,str]:
 
 def encrypt(plaintext:bytes, key:bytes) -> tuple[bytes,bytes,bytes]:
     '''
-    Encrypts the plaintext using AES in GCM mode and returns  tuple[nonce , ciphertext , tag]
+    Encrypts the plaintext using AES in GCM mode and a 256 bit key then returns  tuple[nonce , ciphertext , tag]
     '''
     # Generate a random 16-byte nonce
     nonce = os.urandom(16)
     # Create AES cipher in GCM mode
-    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce,mac_len=16)
     # Encrypt the plaintext
     ciphertext, tag = cipher.encrypt_and_digest(plaintext)
     return nonce, ciphertext, tag
 
-def decrypt(key:bytes, ciphertext:bytes, nonce:bytes, tag:bytes):
+def decrypt(key:bytes, ciphertext:bytes, nonce:bytes, tag:bytes) -> bytes:
     '''
-    Decrypts the ciphertext using AES in GCM mode and verifies the MAC/TAG for integrity check
+    Decrypts the ciphertext using AES in GCM mode and a 256 bit key then verifies the MAC/TAG for integrity check
     '''
     # Create AES cipher in GCM mode with the same nonce
-    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce,mac_len=16)
     # Decrypt the ciphertext
     plaintext = cipher.decrypt_and_verify(ciphertext, tag)
     return plaintext
