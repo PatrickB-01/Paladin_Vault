@@ -1,12 +1,15 @@
 import sqlite3
+from peewee import *
 from peewee import SqliteDatabase
-from playhouse.sqlite_ext import CSqliteExtDatabase
+from playhouse.sqlite_ext import SqliteExtDatabase
 import os
 import pathlib
 from Backend.CryptoUtils import CryptoPaladin as cp
 from Backend.Entities.Password import Password,PasswordDB
 import logging
 from typing import Any,Optional
+import tempfile
+
 
 class SQLiteRepository:
 
@@ -15,7 +18,7 @@ class SQLiteRepository:
     def __init__(self, maindb_path:str, key:bytes) -> None:
         self.maindb_path = maindb_path
         self.key = key
-        #self.database = sqlite3.connect(":memory:")
+        self.database = SqliteExtDatabase(None)
         self.initializeDB()
 
     def __del__(self):
@@ -24,34 +27,47 @@ class SQLiteRepository:
 
     def initializeDB(self) -> None:
         if pathlib.Path(self.maindb_path).exists():
-            self._load_decrypt()
+            self.database.init(self.maindb_path)
+            PasswordDB.init(self.maindb_path)
         else:
-            PasswordDB.init(":memory:")
-            #t = SqliteDatabase(database=self.database)
-            PasswordDB.create_tables([Password])
+            self.database.init(self.maindb_path)
+            PasswordDB.init(self.maindb_path)
+            self.database.create_tables(self.MODELS)
 
-    def _load_decrypt(self):
+    def _transfer_db_to_memory(self, db:bytes, temp_file_name:str=None) -> None:
+        with tempfile.NamedTemporaryFile() as temp_file:
+            pass
+            
+    def load_backup(self, backup_path:str):
         try:
-            with open(self.maindb_path,"rb") as db_file:
+            self._load_decrypt(backup_path=backup_path)
+            self.database.init(self.maindb_path)
+            PasswordDB.init(self.database)
+        except Exception as ex:
+            logging.error(str(ex))
+
+    def _load_decrypt(self, backup_path:str)->None:
+        try:
+            with open(backup_path,"rb") as db_file:
                 encrypted_db_file = db_file.read()
                 nonce = encrypted_db_file[:15]
                 tag = encrypted_db_file[15:31]
                 data = encrypted_db_file[31:]
             decryptedDB:bytes = cp.decrypt(self.key,nonce=nonce,tag=tag,ciphertext=data)
-            PasswordDB.backup_to_file(self.maindb_path)
-            PasswordDB.
-            self.database.deserialize(decryptedDB)
-            PasswordDB.init(self.database)
+            with open(self.maindb_path,"wb") as local_db_file:
+                local_db_file.write(decryptedDB)
         except Exception as ex:
             logging.error(str(ex))
 
 
-    def _flush_encrypt(self,cleanup:bool = False):
+    def _backup_encrypt(self, backup_path:str, cleanup:bool = False):
         # Perform Encryption in memory then write to file
-        plain_db_bytes = self.database.serialize()
-        encrypted_db_bytes = cp.encrypt(plain_db_bytes,self.key)
-        with open(self.maindb_path,"wb") as edb:
-            edb.write(encrypted_db_bytes)
+        with open(self.maindb_path,"rb") as local_db_file:
+            plain_db_bytes = local_db_file.read()
+        
+        nonce,encrypted_db_bytes,tag = cp.encrypt(plain_db_bytes,self.key)
+        with open(backup_path,"wb") as edb:
+            edb.write(nonce+tag+encrypted_db_bytes)
 
         if cleanup:
             self.database.close()

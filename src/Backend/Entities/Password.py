@@ -1,8 +1,8 @@
 import datetime
 from peewee import Model,BlobField,CharField,TextField,AutoField,TimestampField,SqliteDatabase
-from playhouse.sqlite_ext import CSqliteExtDatabase
+from playhouse.sqlite_ext import SqliteExtDatabase
 
-PasswordDB:CSqliteExtDatabase = CSqliteExtDatabase(None)
+PasswordDB:SqliteExtDatabase = SqliteExtDatabase(None)
 
 class BaseModel(Model):
     class Meta:

@@ -50,3 +50,6 @@ mydb = SQLiteRepository(maindb_path=DB,key=derive_result[0])
 
 mydb.create_password_entry(service="test service",username="tester",password=ciphertext,nonce=nonce,tag=tag,link="google.com",note="testing")
 pss = mydb.get_all_passwords()
+for p in pss:
+    print(p.service)
+    print(p.username)
