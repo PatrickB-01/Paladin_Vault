@@ -42,7 +42,7 @@ class SQLiteRepository:
         try:
             self._load_decrypt(backup_path=backup_path)
             self.database.init(self.maindb_path)
-            PasswordDB.init(self.database)
+            PasswordDB.init(self.maindb_path)
         except Exception as ex:
             logging.error(str(ex))
 
@@ -50,9 +50,11 @@ class SQLiteRepository:
         try:
             with open(backup_path,"rb") as db_file:
                 encrypted_db_file = db_file.read()
-                nonce = encrypted_db_file[:15]
-                tag = encrypted_db_file[15:31]
-                data = encrypted_db_file[31:]
+                nonce = encrypted_db_file[:16]
+                tag = encrypted_db_file[16:32]
+                print(nonce)
+                print(tag)
+                data = encrypted_db_file[32:]
             decryptedDB:bytes = cp.decrypt(self.key,nonce=nonce,tag=tag,ciphertext=data)
             with open(self.maindb_path,"wb") as local_db_file:
                 local_db_file.write(decryptedDB)
@@ -60,12 +62,14 @@ class SQLiteRepository:
             logging.error(str(ex))
 
 
-    def _backup_encrypt(self, backup_path:str, cleanup:bool = False):
+    def backup(self, backup_path:str, cleanup:bool = False):
         # Perform Encryption in memory then write to file
         with open(self.maindb_path,"rb") as local_db_file:
             plain_db_bytes = local_db_file.read()
         
         nonce,encrypted_db_bytes,tag = cp.encrypt(plain_db_bytes,self.key)
+        print(nonce)
+        print(tag)
         with open(backup_path,"wb") as edb:
             edb.write(nonce+tag+encrypted_db_bytes)
 

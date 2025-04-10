@@ -5,7 +5,9 @@ from Backend.CryptoUtils.CryptoPaladinExceptions import SaltLengthException
 import logging
 import base64
 from Crypto.Cipher import AES
-
+import time
+import platform
+import psutil
 
 
 # Utility functions for encryption, decryption and key generation
@@ -30,6 +32,40 @@ def generate_key(input:str, salt:bytes = None) -> tuple[str,bytes]:
     # Derive key using Argon2id (salt is prepended internally)
     derived_key:str = ph.hash(input ,salt=salt)
     return (derived_key,salt)
+
+
+def scan_usb_for_file(filename="keyfile.bin", interval=2):
+    print("Scanning for USB containing:", filename)
+    scanned = set()
+
+    while True:
+        time.sleep(interval)
+
+        # Check all mounted/removable drives
+        partitions = psutil.disk_partitions(all=False)
+        for part in partitions:
+            if platform.system() == "Windows":
+                if 'removable' in part.opts.lower():
+                    drive_path = part.mountpoint
+                else:
+                    continue
+            else:  # Linux/macOS
+                if part.mountpoint.startswith("/media") or part.mountpoint.startswith("/run/media"):
+                    drive_path = part.mountpoint
+                else:
+                    continue
+
+            file_path = os.path.join(drive_path, filename)
+            if file_path in scanned:
+                continue  # Skip if already checked
+
+            scanned.add(file_path)
+
+            if os.path.isfile(file_path):
+                print(f"Found '{filename}' on {drive_path}")
+                return file_path  # Or return drive_path if you prefer
+
+        print("Waiting for USB with the target file...")
 
 
 def save_key(key:str, salt:bytes, key_file:str) -> None:

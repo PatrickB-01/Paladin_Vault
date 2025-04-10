@@ -1,11 +1,12 @@
 from Backend.CryptoUtils import CryptoPaladin as cp
 import logging
 from Backend.Repository.SQLiteRepository import SQLiteRepository
+import pathlib
 # To-Do configure logging
 LOGFILE = r"D:\MyFiles\side_projects\PythonPassManager\logs\PaladinVaultLogs.log"
 KEYFILE = r"D:\MyFiles\side_projects\PythonPassManager\testdir\key.bin"
 DB = r"D:\MyFiles\side_projects\PythonPassManager\testdir\Passwords.db"
-
+DB2 = r"D:\MyFiles\side_projects\PythonPassManager\testdir\Passwords2.db"
 logging.basicConfig(
     filename=LOGFILE,
     encoding="utf-8",
@@ -48,8 +49,26 @@ print("Result:",byte_decrypted.decode())
 
 mydb = SQLiteRepository(maindb_path=DB,key=derive_result[0])
 
-mydb.create_password_entry(service="test service",username="tester",password=ciphertext,nonce=nonce,tag=tag,link="google.com",note="testing")
+mydb.create_password_entry(service="QT",username="goldenboycoder@gmail.com",password=ciphertext,nonce=nonce,tag=tag,link="google.com",note="testing")
 pss = mydb.get_all_passwords()
 for p in pss:
     print(p.service)
     print(p.username)
+
+# database backup and restore
+
+
+
+mydb.backup(backup_path=DB2)
+mydb.load_backup(backup_path=DB2)
+
+
+pss = mydb.get_all_passwords()
+for p in pss:
+    print(p.service)
+    print(p.username)
+    
+
+# usb key detection
+
+found_file = cp.scan_usb_for_file(filename=pathlib.Path(KEYFILE).name)
