@@ -22,6 +22,7 @@ class Password(BaseModel):
     pid = AutoField(null = True,unique=True,primary_key = True)
     service = TextField(index = True)
     username = TextField(index = True)
+    email = TextField(index = True,null = True,default=None)
     password = BlobField()
     tag =  BlobField()
     nonce = BlobField()
