@@ -40,13 +40,13 @@ class PaladinVaultController:
             # 2. Verify the master password against the loaded key (which is actually a hash) and salt
             # cp.verify_key internally re-derives the key from master_password and salt,
             # then compares it with loaded_key_data.
-            if not cp.verify_key(input_password=master_password, key_hash_from_file=loaded_key_data, salt=salt):
+            if not cp.verify_key(input=master_password, key=loaded_key_data, salt=salt):
                 # This path should ideally be caught by verify_key raising InvalidPasswordException
                 raise InvalidPasswordException("Master password verification failed.")
 
             # 3. If verification is successful, derive the actual encryption key for database operations
             # This derived key is what will be used for encrypting/decrypting data in the database.
-            self.derived_key, _ = cp.derive_key(password=master_password, salt=salt, key_length=32) # Use the same salt
+            self.derived_key, _ = cp.derive_key(input=master_password, salt=salt) # Use the same salt
 
             # 4. (Optional but recommended) Initialize SQLiteRepository here if login is successful
             # self.initialize_repository() # You'll need to decide where your DB file is stored.
@@ -77,6 +77,7 @@ class PaladinVaultController:
         print(f"Database repository initialized with path: {db_path}")
         # You might want to create tables if they don't exist upon initialization
         # self.db_repository.create_tables_if_not_exist() # Assuming such a method exists in SQLiteRepository
+        self.db_repository.initializeDB()
 
     def get_repository(self) -> SQLiteRepository | None:
         """
@@ -115,8 +116,15 @@ if __name__ == '__main__':
     # print("Dummy key file created as dummy_key.bin")
     # --- ---
 
-    DUMMY_KEY_FILE = "dummy_key.bin"
-    DUMMY_DB_FILE = "dummy_test_vault.db"
+    DUMMY_KEY_FILE = r"D:\MyFiles\side_projects\PythonPassManager\testdir\dummy_key.bin"
+    DUMMY_DB_FILE = r"D:\MyFiles\side_projects\PythonPassManager\testdir\dummy_Passwords.db"
+
+    password = "test"
+    generate_result = cp.generate_key(password)
+    print("Key: ",generate_result[0])
+    print("Salt: ",generate_result[1])
+
+    cp.save_key(generate_result[0],generate_result[1],DUMMY_KEY_FILE)
 
     if not os.path.exists(DUMMY_KEY_FILE):
         print(f"Error: Dummy key file '{DUMMY_KEY_FILE}' not found.")
@@ -124,7 +132,7 @@ if __name__ == '__main__':
     else:
         try:
             print(f"Attempting login with password 'testpassword' and key file '{DUMMY_KEY_FILE}'...")
-            if controller.login("testpassword", DUMMY_KEY_FILE):
+            if controller.login("test", DUMMY_KEY_FILE):
                 print("Controller login successful.")
 
                 # Initialize repository
