@@ -1,17 +1,18 @@
 import os
 import sys
-
+from pathlib import Path
 # Adjust import path for backend modules
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from Backend.CryptoUtils import CryptoPaladin as cp
 from Backend.CryptoUtils.CryptoPaladinExceptions import InvalidPasswordException, KeyFileNotFoundException
 from Backend.Repository.SQLiteRepository import SQLiteRepository
-
+from Backend.Entities.Password import Password
 class PaladinVaultController:
     def __init__(self):
         self.derived_key = None
         self.db_repository = None
+        self.key_file_path = None
 
     def login(self, master_password: str, key_file_path: str) -> bool:
         """
@@ -50,8 +51,11 @@ class PaladinVaultController:
 
             # 4. (Optional but recommended) Initialize SQLiteRepository here if login is successful
             # self.initialize_repository() # You'll need to decide where your DB file is stored.
-
+            self.key_file_path=key_file_path
             print("Login successful. Encryption key derived.")
+
+            self.initialize_repository()
+
             return True
 
         except InvalidPasswordException:
@@ -65,7 +69,7 @@ class PaladinVaultController:
             raise Exception(f"Login process failed: {e}")
 
 
-    def initialize_repository(self, db_path: str):
+    def initialize_repository(self):
         """
         Initializes the SQLiteRepository with the derived key.
         This should be called after a successful login.
@@ -73,8 +77,8 @@ class PaladinVaultController:
         if not self.derived_key:
             raise Exception("Derived key is not available. Login must be successful first.")
 
-        self.db_repository = SQLiteRepository(maindb_path=db_path, key=self.derived_key)
-        print(f"Database repository initialized with path: {db_path}")
+        self.db_repository = SQLiteRepository(key=self.derived_key)
+        print(f"Database repository initialized with path: {self.db_repository.get_db_path()}")
         # You might want to create tables if they don't exist upon initialization
         # self.db_repository.create_tables_if_not_exist() # Assuming such a method exists in SQLiteRepository
         self.db_repository.initializeDB()
@@ -103,9 +107,8 @@ class PaladinVaultController:
     #         decrypted_entries.append(decrypted_entry)
     #     return decrypted_entries
 
-    def add_password_entry_controller(self, service: str, username: str, email: str | None,
-                                    password_ciphertext: bytes, nonce: bytes, tag: bytes,
-                                    link: str | None, category: str | None, note: str | None) -> None:
+    def add_password_entry_controller(self, service: str, username: str, email: str | None, password: str,
+                                      link: str | None, category: str | None, note: str | None) -> None:
         """
         Adds a new password entry to the database via the repository.
         Assumes password is already encrypted.
@@ -114,16 +117,19 @@ class PaladinVaultController:
             raise Exception("Database repository not initialized. Cannot add entry.")
 
         try:
+            enc_nonce, enc_ciphertext, enc_tag = cp.encrypt(password.encode('utf-8'), self.derived_key)
             self.db_repository.create_password_entry(
-                service=service,
-                username=username,
-                email=email,
-                password=password_ciphertext, # This is the encrypted password
-                nonce=nonce,
-                tag=tag,
-                link=link,
-                category=category,
-                note=note
+                password_entity=Password(
+                    service=service,
+                    username=username,
+                    email=email,
+                    password=enc_ciphertext, # This is the encrypted password
+                    nonce=enc_nonce,
+                    tag=enc_tag,
+                    link=link,
+                    category=category,
+                    note=note
+                )
             )
             print(f"Controller: Successfully added entry for service '{service}' to the database.")
         except Exception as e:
@@ -132,6 +138,25 @@ class PaladinVaultController:
             # or handle it more gracefully here (e.g., logging).
             raise Exception(f"Failed to add password entry in controller: {e}")
 
+    def get_passwords(self, page:int|None=None, size:int|None=None)->list[Password]:
+        try:
+            return self.db_repository.get_all_passwords()
+        except Exception as ex:
+            print(f"Exception occured while trying to retrieve password {str(ex)}")
+
+    def backup_vault(self, backup_path:str|None = None):
+        try:
+            if not backup_path:
+                # Value None
+                kf = Path(self.key_file_path)
+                if kf.is_file():
+                    parent_dir = kf.parent
+                    backup_path = parent_dir/"PaladinVault_Backup.bin"
+                    
+                
+            self.db_repository.backup(backup_path=backup_path)
+        except Exception as ex:
+            raise Exception(f"Failed backing up the vault")
 
 if __name__ == '__main__':
     # Example Usage (for testing purposes)
@@ -166,7 +191,7 @@ if __name__ == '__main__':
                 print("Controller login successful.")
 
                 # Initialize repository
-                controller.initialize_repository(db_path=DUMMY_DB_FILE)
+                controller.initialize_repository()
                 repo = controller.get_repository()
                 if repo:
                     print(f"Repository ready for operations on {DUMMY_DB_FILE}.")

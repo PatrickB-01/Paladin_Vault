@@ -185,17 +185,6 @@ class LoginWindow:
             if self.controller.login(master_password, key_file):
                 messagebox.showinfo("Login Success", "Vault Unlocked!")
 
-                # --- Database Initialization ---
-                # For now, let's assume a fixed DB name in the same dir as the key file
-                # In a real app, this might be configurable or stored elsewhere.
-                key_file_dir = os.path.dirname(key_file)
-                db_name = "PaladinVault.db" # Or derive from key file name, e.g. os.path.splitext(os.path.basename(key_file))[0] + ".db"
-                db_path = os.path.join(key_file_dir, db_name)
-
-                print(f"Attempting to initialize database at: {db_path}")
-                self.controller.initialize_repository(db_path)
-                # --- End Database Initialization ---
-
                 self.root.destroy() # Close login window
                 start_main_app(self.controller) # Pass controller to main app
             # No 'else' needed as controller.login will raise exceptions on failure
@@ -235,7 +224,7 @@ class PaladinVaultUIApp:
         action_bar = ttk.Frame(main_frame)
         action_bar.pack(fill="x", pady=(0,10))
         ttk.Button(action_bar, text="Add New", command=self.open_add_password_dialog).pack(side="left", padx=(0,5))
-        ttk.Button(action_bar, text="Backup Vault").pack(side="left") # Placeholder for backup
+        ttk.Button(action_bar, text="Backup Vault", command = self.backup_vault).pack(side="left") # Placeholder for backup
 
         # Password display area
         columns = ("service", "username", "password", "link", "note") # Added more columns
@@ -269,18 +258,18 @@ class PaladinVaultUIApp:
         for item in self.tree.get_children():
             self.tree.delete(item)
 
-        repository = self.controller.get_repository()
+        #repository = self.controller.get_repository()
         derived_key = self.controller.derived_key # The key used for DB encryption
 
-        if not repository:
-            messagebox.showerror("Error", "Database repository is not initialized.")
-            return
+        # if not repository:
+        #     messagebox.showerror("Error", "Database repository is not initialized.")
+        #     return
         if not derived_key:
             messagebox.showerror("Error", "Encryption key is not available.")
             return
 
         try:
-            encrypted_passwords = repository.get_all_passwords()
+            encrypted_passwords = self.controller.get_passwords()
             if not encrypted_passwords:
                 # Display a message in the tree or a label if no passwords
                 # For now, just print to console. UI can be enhanced later.
@@ -325,11 +314,17 @@ class PaladinVaultUIApp:
 
     def open_add_password_dialog(self):
         # Pass `self.root` as parent and `self.controller`
-        dialog = AddPasswordDialog(self.root, self.controller)
+        dialog = AddPasswordDialog(self.root, self, self.controller)
         # The dialog's save_entry method will call self.load_and_display_passwords() on this instance (its parent)
         # if save is successful, because it's passed as self.parent.
         # No explicit wait_window needed if the dialog handles its lifecycle and calls back for refresh.
 
+    def backup_vault(self):
+        # backup vault and display status
+        try:
+            self.controller.backup_vault()
+        except Exception as ex:
+            print(f"Exception occured while backing up the vault: {str(ex)}")
 
 def start_main_app(controller: PaladinVaultController):
     # This function will eventually initialize and show the main app window
@@ -340,9 +335,10 @@ def start_main_app(controller: PaladinVaultController):
 
 
 class AddPasswordDialog(tk.Toplevel):
-    def __init__(self, parent, controller: PaladinVaultController):
+    def __init__(self, parent, list:PaladinVaultUIApp,controller: PaladinVaultController):
         super().__init__(parent)
         self.parent = parent
+        self.list = list
         self.controller = controller
         self.transient(parent) # Dialog stays on top of the parent window
         self.title("Add New Password Entry")
@@ -428,7 +424,7 @@ class AddPasswordDialog(tk.Toplevel):
         button_frame = ttk.Frame(main_frame)
         button_frame.grid(row=8, column=0, columnspan=3, pady=(10,0))
 
-        save_button = ttk.Button(button_frame, text="Save", style="Accent.TButton", command=self.save_entry)
+        save_button = ttk.Button(button_frame, text="Save", command=self.save_entry)
         save_button.pack(side="left", padx=5)
         cancel_button = ttk.Button(button_frame, text="Cancel", command=self.destroy)
         cancel_button.pack(side="left", padx=5)
@@ -439,12 +435,6 @@ class AddPasswordDialog(tk.Toplevel):
         # Set focus to the first entry field
         service_entry.focus_set()
 
-        # Apply a style for the save button if available (e.g. from Azure theme)
-        try:
-            s = ttk.Style()
-            s.configure("Accent.TButton", foreground="white") # Example
-        except tk.TclError:
-            print("Accent.TButton style not available or applicable.")
 
 
     def toggle_password_visibility_dialog(self):
@@ -483,23 +473,21 @@ class AddPasswordDialog(tk.Toplevel):
                 messagebox.showerror("Error", "Encryption key not available. Cannot save.", parent=self)
                 return
 
-            enc_nonce, enc_ciphertext, enc_tag = cp.encrypt(password.encode('utf-8'), derived_key)
+            #enc_nonce, enc_ciphertext, enc_tag = cp.encrypt(password.encode('utf-8'), derived_key)
 
             # Call the controller method to add the entry
             self.controller.add_password_entry_controller(
                 service=service,
                 username=username,
                 email=email,
-                password_ciphertext=enc_ciphertext,
-                nonce=enc_nonce,
-                tag=enc_tag,
+                password=password,
                 link=link,
                 category=category,
                 note=note
             )
 
             messagebox.showinfo("Success", "Password entry saved successfully!", parent=self.parent) # Show on parent
-            self.parent.load_and_display_passwords() # Refresh parent's list
+            self.list.load_and_display_passwords() # Refresh parent's list
             self.destroy() # Close dialog
 
         except Exception as e:
@@ -554,78 +542,6 @@ class AddPasswordDialog(tk.Toplevel):
         self.note_char_count_var.set(f"{current_len}/{MAX_NOTE_LEN}")
 
 
-# --- Test Data Setup ---
-def setup_test_environment(base_path="."):
-    """
-    Sets up a dummy key.bin and PaladinVault.db for testing.
-    IMPORTANT: This will overwrite existing files with these names in the base_path.
-    """
-    TEST_MASTER_PASSWORD = "testpassword"
-    KEY_FILE = os.path.join(base_path, "key.bin")
-    DB_FILE = os.path.join(base_path, "PaladinVault.db")
-
-    print(f"Setting up test environment in: {os.path.abspath(base_path)}")
-    print(f"Test Master Password: {TEST_MASTER_PASSWORD}")
-
-    # 1. Generate and Save Key File
-    try:
-        print(f"Generating key file at: {KEY_FILE}")
-        key_hash, salt = cp.generate_key(TEST_MASTER_PASSWORD)
-        cp.save_key(key_hash, salt, KEY_FILE)
-        print("key.bin created successfully.")
-    except Exception as e:
-        print(f"Error creating key.bin: {e}")
-        return
-
-    # 2. Derive encryption key and setup database
-    try:
-        print(f"Setting up database at: {DB_FILE}")
-        derived_key, _ = cp.derive_key(TEST_MASTER_PASSWORD, salt)
-
-        # Ensure database is clean for test setup
-        if os.path.exists(DB_FILE):
-            os.remove(DB_FILE)
-            print(f"Removed existing DB_FILE: {DB_FILE}")
-
-        repo = SQLiteRepository(maindb_path=DB_FILE, key=derived_key)
-        # The SQLiteRepository constructor should ideally call a method to create tables if they don't exist.
-        # Assuming it does, or that create_password_entry will handle table creation.
-        # If not, you might need: repo.create_tables()
-
-        print("Database repository initialized.")
-
-        # 3. Add a test password entry
-        test_service_password = "mysecretwebsite_password"
-        nonce, ciphertext, tag = cp.encrypt(test_service_password.encode(), derived_key)
-
-        repo.create_password_entry(
-            service="TestService",
-            username="testuser@example.com",
-            password=ciphertext, # Storing the encrypted password
-            nonce=nonce,
-            tag=tag,
-            link="https://example.com",
-            note="This is a test entry."
-        )
-        print("Test password entry added to the database.")
-
-        # Add another entry
-        test_service_password_2 = "anotherSecurePa$$"
-        nonce2, ciphertext2, tag2 = cp.encrypt(test_service_password_2.encode(), derived_key)
-        repo.create_password_entry(
-            service="AnotherWebApp",
-            username="jane.doe",
-            password=ciphertext2,
-            nonce=nonce2,
-            tag=tag2,
-            link="https.another.com/login",
-            note="Second test entry for variety."
-        )
-        print("Second test password entry added.")
-        print("Test environment setup complete.")
-
-    except Exception as e:
-        print(f"Error setting up database or adding test entry: {e}")
 
 # Original LoadingWindow and other functions might be reused or refactored later if needed.
 # For now, we are focusing on the Login Screen.
