@@ -8,6 +8,8 @@ from Crypto.Cipher import AES
 import time
 import platform
 import psutil
+import secrets
+import string
 
 
 # Utility functions for encryption, decryption and key generation
@@ -130,3 +132,54 @@ def decrypt(key:bytes, ciphertext:bytes, nonce:bytes, tag:bytes) -> bytes:
     # Decrypt the ciphertext
     plaintext = cipher.decrypt_and_verify(ciphertext, tag)
     return plaintext
+
+
+def generate_secure_password(length: int = 16) -> str:
+    """
+    Generates a cryptographically secure random password.
+
+    Args:
+        length: The desired length of the password. Must be between 8 and 128.
+
+    Returns:
+        A string containing the generated password.
+        The password will contain at least one uppercase letter, one lowercase letter,
+        one digit, and one special character.
+
+    Raises:
+        ValueError: If the length is outside the allowed range.
+    """
+    if not (8 <= length <= 128):
+        raise ValueError("Password length must be between 8 and 128 characters.")
+
+    # Define character sets
+    lowercase = string.ascii_lowercase
+    uppercase = string.ascii_uppercase
+    digits = string.digits
+    # Using a more common set of special characters for passwords
+    special_chars = "!@#$%^&*()_+-=[]{}|;:,.<>?"
+
+
+    # Ensure the password contains at least one of each required character type
+    password_chars = [
+        secrets.choice(lowercase),
+        secrets.choice(uppercase),
+        secrets.choice(digits),
+        secrets.choice(special_chars)
+    ]
+
+    # Fill the rest of the password length with a mix of all characters
+    all_chars = lowercase + uppercase + digits + special_chars
+    # Ensure we have enough characters to pick from for the remaining length
+    if length < 4: # Should be caught by the initial length check, but as a safeguard
+        password_chars = password_chars[:length] # Truncate if length is less than 4
+
+    remaining_length = length - len(password_chars)
+    if remaining_length > 0:
+        for _ in range(remaining_length):
+            password_chars.append(secrets.choice(all_chars))
+
+    # Shuffle the characters to make the positions random
+    secrets.SystemRandom().shuffle(password_chars)
+
+    return "".join(password_chars)

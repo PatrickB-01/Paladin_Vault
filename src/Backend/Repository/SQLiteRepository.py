@@ -15,8 +15,14 @@ class SQLiteRepository:
 
     MODELS = [Password]
 
-    def __init__(self, maindb_path:str, key:bytes) -> None:
-        self.maindb_path = maindb_path
+    DB_PATH_DIR = "PaladinVault"
+    DB_FILE_NAME = "PaladinVault.db"
+
+    def __init__(self,key:bytes, maindb_path:str|None=None) -> None:
+
+        if not maindb_path:
+            self.maindb_path = self.get_db_path()
+
         self.key = key
         self.database = SqliteExtDatabase(None)
         self.initializeDB()
@@ -24,6 +30,23 @@ class SQLiteRepository:
     def __del__(self):
         if self.database:
             self._flush_encrypt(cleanup=True)
+
+    def get_db_path(self)->str:
+        if os.name == "nt":  # Windows
+            base_dir = os.getenv('LOCALAPPDATA', os.path.expanduser('~\\AppData\\Local'))
+        else:
+            base_dir = os.path.expanduser(f'~/.{self.DB_PATH_DIR.lower()}')
+        
+        
+
+        # Path to your password DB
+        db_path_dir = os.path.join(base_dir, self.DB_PATH_DIR)
+
+        # Ensure the directory exists
+        pathlib.Path(db_path_dir).mkdir(parents=True, exist_ok=True)
+
+        db_path_file = os.path.join(db_path_dir, self.DB_FILE_NAME)
+        return db_path_file
 
     def initializeDB(self) -> None:
         if pathlib.Path(self.maindb_path).exists():
@@ -76,7 +99,10 @@ class SQLiteRepository:
         if cleanup:
             self.database.close()
 
-    def create_password_entry(self, service: str, username: str, password: bytes, tag: bytes, nonce: bytes, link: Optional[str] = None, note: Optional[str] = None) -> Password:
+    def create_password_entry(self, service: str, username: str, password: bytes, tag: bytes, nonce: bytes, 
+                              link: str | None = None, 
+                              note: str | None = None, 
+                              category:str|None = None) -> Password:
         return Password.create(
             service=service,
             username=username,
@@ -84,13 +110,26 @@ class SQLiteRepository:
             tag=tag,
             nonce=nonce,
             link=link,
-            note=note
+            note=note,
+            category=category
+        )
+    
+    def create_password_entry(self, password_entity:Password) -> Password:
+        return Password.create(
+            service=password_entity.service,
+            username=password_entity.username,
+            password=password_entity.password,
+            tag=password_entity.tag,
+            nonce=password_entity.nonce,
+            link=password_entity.link,
+            note=password_entity.note,
+            category=password_entity.category
         )
 
     def get_password_by_id(self,pid: int) -> Optional[Password]:
         try:
             return Password.get(Password.pid == pid)
-        except Password.DoesNotExist:
+        except Exception as ex:
             return None
 
     def get_passwords_by_service(self,service: str) -> list[Password]:
