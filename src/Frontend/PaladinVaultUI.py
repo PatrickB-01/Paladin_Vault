@@ -234,8 +234,8 @@ class PaladinVaultUIApp:
         # Placeholder for top bar actions (e.g., Add, Backup)
         action_bar = ttk.Frame(main_frame)
         action_bar.pack(fill="x", pady=(0,10))
-        ttk.Button(action_bar, text="Add New").pack(side="left", padx=(0,5))
-        ttk.Button(action_bar, text="Backup Vault").pack(side="left")
+        ttk.Button(action_bar, text="Add New", command=self.open_add_password_dialog).pack(side="left", padx=(0,5))
+        ttk.Button(action_bar, text="Backup Vault").pack(side="left") # Placeholder for backup
 
         # Password display area
         columns = ("service", "username", "password", "link", "note") # Added more columns
@@ -323,6 +323,13 @@ class PaladinVaultUIApp:
             messagebox.showerror("Load Error", f"Failed to load passwords: {e}")
             print(f"Error in load_and_display_passwords: {e}")
 
+    def open_add_password_dialog(self):
+        # Pass `self.root` as parent and `self.controller`
+        dialog = AddPasswordDialog(self.root, self.controller)
+        # The dialog's save_entry method will call self.load_and_display_passwords() on this instance (its parent)
+        # if save is successful, because it's passed as self.parent.
+        # No explicit wait_window needed if the dialog handles its lifecycle and calls back for refresh.
+
 
 def start_main_app(controller: PaladinVaultController):
     # This function will eventually initialize and show the main app window
@@ -330,6 +337,222 @@ def start_main_app(controller: PaladinVaultController):
     root = tk.Tk()
     app = PaladinVaultUIApp(root, controller) # Pass controller
     root.mainloop()
+
+
+class AddPasswordDialog(tk.Toplevel):
+    def __init__(self, parent, controller: PaladinVaultController):
+        super().__init__(parent)
+        self.parent = parent
+        self.controller = controller
+        self.transient(parent) # Dialog stays on top of the parent window
+        self.title("Add New Password Entry")
+        self.geometry("500x550") # Adjusted size
+        self.resizable(False, False)
+        self.grab_set() # Modal behavior
+
+        self.service_var = tk.StringVar()
+        self.username_var = tk.StringVar()
+        self.email_var = tk.StringVar()
+        self.password_var = tk.StringVar()
+        self.link_var = tk.StringVar()
+        self.category_var = tk.StringVar(value="general") # Default value
+        # Note will use a Text widget, not a StringVar directly for multi-line and char count
+
+        self.setup_dialog_ui()
+
+    def setup_dialog_ui(self):
+        main_frame = ttk.Frame(self, padding="15")
+        main_frame.pack(fill="both", expand=True)
+
+        # --- Input Fields ---
+        # Service
+        ttk.Label(main_frame, text="Service:").grid(row=0, column=0, sticky="w", pady=2)
+        service_entry = ttk.Entry(main_frame, textvariable=self.service_var, width=40)
+        service_entry.grid(row=0, column=1, columnspan=2, sticky="ew", pady=2)
+
+        # Username
+        ttk.Label(main_frame, text="Username:").grid(row=1, column=0, sticky="w", pady=2)
+        username_entry = ttk.Entry(main_frame, textvariable=self.username_var, width=40)
+        username_entry.grid(row=1, column=1, columnspan=2, sticky="ew", pady=2)
+
+        # Email
+        ttk.Label(main_frame, text="Email (optional):").grid(row=2, column=0, sticky="w", pady=2)
+        email_entry = ttk.Entry(main_frame, textvariable=self.email_var, width=40)
+        email_entry.grid(row=2, column=1, columnspan=2, sticky="ew", pady=2)
+
+        # Password
+        ttk.Label(main_frame, text="Password:").grid(row=3, column=0, sticky="w", pady=2)
+        password_frame = ttk.Frame(main_frame)
+        password_frame.grid(row=3, column=1, columnspan=2, sticky="ew", pady=2)
+
+        self.password_entry = ttk.Entry(password_frame, textvariable=self.password_var, show="•", width=30)
+        self.password_entry.pack(side="left", expand=True, fill="x")
+
+        self.show_password_var_dialog = tk.BooleanVar(value=False)
+        # Placeholder for actual icon button for show/hide
+        show_hide_button = ttk.Checkbutton(password_frame, text="👁", variable=self.show_password_var_dialog, command=self.toggle_password_visibility_dialog, style="Toolbutton")
+        show_hide_button.pack(side="left", padx=(5,0))
+        # Placeholder for generate password button
+        generate_button = ttk.Button(password_frame, text="Generate", width=8, command=self.generate_password_action)
+        generate_button.pack(side="left", padx=(5,0))
+
+
+        # Link
+        ttk.Label(main_frame, text="Link (optional):").grid(row=4, column=0, sticky="w", pady=2)
+        link_entry = ttk.Entry(main_frame, textvariable=self.link_var, width=40)
+        link_entry.grid(row=4, column=1, columnspan=2, sticky="ew", pady=2)
+
+        # Category
+        ttk.Label(main_frame, text="Category (optional):").grid(row=5, column=0, sticky="w", pady=2)
+        # Could use ttk.Combobox if predefined categories are desired later
+        category_entry = ttk.Entry(main_frame, textvariable=self.category_var, width=40)
+        category_entry.grid(row=5, column=1, columnspan=2, sticky="ew", pady=2)
+
+        # Note
+        ttk.Label(main_frame, text="Note (optional, max 1000 chars):").grid(row=6, column=0, sticky="nw", pady=2)
+        note_frame = ttk.Frame(main_frame) # Frame for text widget and scrollbar
+        note_frame.grid(row=6, column=1, columnspan=2, sticky="ew", pady=2)
+
+        self.note_text = tk.Text(note_frame, height=5, width=38, wrap="word") # width in chars, height in lines
+        note_scrollbar = ttk.Scrollbar(note_frame, orient="vertical", command=self.note_text.yview)
+        self.note_text.configure(yscrollcommand=note_scrollbar.set)
+        self.note_text.pack(side="left", fill="both", expand=True)
+        note_scrollbar.pack(side="right", fill="y")
+        # Character counter (placeholder, logic to be added)
+        self.note_char_count_var = tk.StringVar(value="0/1000")
+        ttk.Label(main_frame, textvariable=self.note_char_count_var).grid(row=7, column=1, columnspan=2, sticky="e", pady=(0,5))
+        self.note_text.bind("<KeyRelease>", self.update_note_char_count) # Bind to KeyRelease
+        self.update_note_char_count() # Initial call to set counter
+
+        # --- Action Buttons ---
+        button_frame = ttk.Frame(main_frame)
+        button_frame.grid(row=8, column=0, columnspan=3, pady=(10,0))
+
+        save_button = ttk.Button(button_frame, text="Save", style="Accent.TButton", command=self.save_entry)
+        save_button.pack(side="left", padx=5)
+        cancel_button = ttk.Button(button_frame, text="Cancel", command=self.destroy)
+        cancel_button.pack(side="left", padx=5)
+
+        # Configure column weights for responsiveness of central column
+        main_frame.columnconfigure(1, weight=1)
+
+        # Set focus to the first entry field
+        service_entry.focus_set()
+
+        # Apply a style for the save button if available (e.g. from Azure theme)
+        try:
+            s = ttk.Style()
+            s.configure("Accent.TButton", foreground="white") # Example
+        except tk.TclError:
+            print("Accent.TButton style not available or applicable.")
+
+
+    def toggle_password_visibility_dialog(self):
+        if self.show_password_var_dialog.get():
+            self.password_entry.config(show="")
+        else:
+            self.password_entry.config(show="•")
+
+    def save_entry(self):
+        service = self.service_var.get().strip()
+        username = self.username_var.get().strip()
+        password = self.password_var.get() # No strip, allow spaces if user insists
+        email = self.email_var.get().strip()
+        link = self.link_var.get().strip()
+        category = self.category_var.get().strip() if self.category_var.get().strip() else "general"
+        note = self.note_text.get("1.0", tk.END).strip()
+
+        # Validation
+        if not service:
+            messagebox.showerror("Validation Error", "Service field cannot be empty.", parent=self)
+            return
+        if not username:
+            messagebox.showerror("Validation Error", "Username field cannot be empty.", parent=self)
+            return
+        if not password:
+            messagebox.showerror("Validation Error", "Password field cannot be empty.", parent=self)
+            return
+
+        if len(note) > 1000:
+            messagebox.showerror("Validation Error", "Note cannot exceed 1000 characters.", parent=self)
+            return
+
+        try:
+            derived_key = self.controller.derived_key
+            if not derived_key:
+                messagebox.showerror("Error", "Encryption key not available. Cannot save.", parent=self)
+                return
+
+            enc_nonce, enc_ciphertext, enc_tag = cp.encrypt(password.encode('utf-8'), derived_key)
+
+            # Call the controller method to add the entry
+            self.controller.add_password_entry_controller(
+                service=service,
+                username=username,
+                email=email,
+                password_ciphertext=enc_ciphertext,
+                nonce=enc_nonce,
+                tag=enc_tag,
+                link=link,
+                category=category,
+                note=note
+            )
+
+            messagebox.showinfo("Success", "Password entry saved successfully!", parent=self.parent) # Show on parent
+            self.parent.load_and_display_passwords() # Refresh parent's list
+            self.destroy() # Close dialog
+
+        except Exception as e:
+            messagebox.showerror("Save Error", f"Failed to save entry: {e}", parent=self)
+            print(f"Error during save_entry: {e}")
+
+    def generate_password_action(self):
+        try:
+            generated_password = cp.generate_secure_password(length=16) # Default length 16
+            self.password_var.set(generated_password)
+
+            # Briefly show the password
+            self.password_entry.config(show="")
+            self.show_password_var_dialog.set(True) # Sync checkbox state
+
+            # Copy to clipboard
+            try:
+                import pyperclip
+                pyperclip.copy(generated_password)
+                # Optionally show a small notification label that it was copied
+                # For now, just print to console
+                print("Generated password copied to clipboard.")
+            except ImportError:
+                print("Pyperclip not installed. Cannot copy to clipboard. Please install it: pip install pyperclip")
+            except Exception as clip_err:
+                print(f"Error copying to clipboard: {clip_err}")
+
+            # After a delay, re-mask the password
+            self.after(2000, self.remask_password_after_generate) # 2 seconds
+
+        except ValueError as ve:
+            messagebox.showerror("Password Generation Error", str(ve), parent=self)
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not generate password: {e}", parent=self)
+
+    def remask_password_after_generate(self):
+        # Only remask if the user hasn't unchecked the visibility toggle themselves during the delay
+        if self.show_password_var_dialog.get():
+            self.password_entry.config(show="•")
+            self.show_password_var_dialog.set(False) # Sync checkbox state
+
+    def update_note_char_count(self, event=None):
+        MAX_NOTE_LEN = 1000
+        current_text = self.note_text.get("1.0", tk.END).rstrip('\n') # rstrip to avoid counting trailing newline
+        current_len = len(current_text)
+
+        if current_len > MAX_NOTE_LEN:
+            # Trim text if it exceeds max length
+            self.note_text.delete(f"1.0 + {MAX_NOTE_LEN}c", tk.END)
+            current_len = MAX_NOTE_LEN
+
+        self.note_char_count_var.set(f"{current_len}/{MAX_NOTE_LEN}")
+
 
 # --- Test Data Setup ---
 def setup_test_environment(base_path="."):
@@ -374,7 +597,7 @@ def setup_test_environment(base_path="."):
         # 3. Add a test password entry
         test_service_password = "mysecretwebsite_password"
         nonce, ciphertext, tag = cp.encrypt(test_service_password.encode(), derived_key)
-        
+
         repo.create_password_entry(
             service="TestService",
             username="testuser@example.com",

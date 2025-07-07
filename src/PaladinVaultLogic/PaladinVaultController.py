@@ -103,6 +103,36 @@ class PaladinVaultController:
     #         decrypted_entries.append(decrypted_entry)
     #     return decrypted_entries
 
+    def add_password_entry_controller(self, service: str, username: str, email: str | None,
+                                    password_ciphertext: bytes, nonce: bytes, tag: bytes,
+                                    link: str | None, category: str | None, note: str | None) -> None:
+        """
+        Adds a new password entry to the database via the repository.
+        Assumes password is already encrypted.
+        """
+        if not self.db_repository:
+            raise Exception("Database repository not initialized. Cannot add entry.")
+
+        try:
+            self.db_repository.create_password_entry(
+                service=service,
+                username=username,
+                email=email,
+                password=password_ciphertext, # This is the encrypted password
+                nonce=nonce,
+                tag=tag,
+                link=link,
+                category=category,
+                note=note
+            )
+            print(f"Controller: Successfully added entry for service '{service}' to the database.")
+        except Exception as e:
+            print(f"Controller: Error adding password entry for service '{service}': {e}")
+            # Re-raise the exception to be handled by the UI if needed,
+            # or handle it more gracefully here (e.g., logging).
+            raise Exception(f"Failed to add password entry in controller: {e}")
+
+
 if __name__ == '__main__':
     # Example Usage (for testing purposes)
     controller = PaladinVaultController()
