@@ -13,3 +13,23 @@ class InvalidPasswordException(Exception):
 class  KeyFileNotFoundException(Exception):
     def __init__(self, message):
         super().__init__(message)
+
+
+class VaultCreationException(Exception):
+    def __init__(self, message):
+        super().__init__(message)
+
+
+class VaultAlreadyExistsException(VaultCreationException):
+    def __init__(self, message):
+        super().__init__(message)
+
+
+class InvalidUSBPathException(VaultCreationException):
+    def __init__(self, message):
+        super().__init__(message)
+
+
+class InvalidVaultConfigurationException(VaultCreationException):
+    def __init__(self, message):
+        super().__init__(message)

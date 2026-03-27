@@ -1,210 +1,207 @@
 import os
-import sys
-from pathlib import Path
-# Adjust import path for backend modules
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from Backend.CryptoUtils import CryptoPaladin as cp
-from Backend.CryptoUtils.CryptoPaladinExceptions import InvalidPasswordException, KeyFileNotFoundException
-from Backend.Repository.SQLiteRepository import SQLiteRepository
+import psutil
+
+from Backend.CryptoUtils.CryptoPaladinExceptions import InvalidUSBPathException, VaultAlreadyExistsException
 from Backend.Entities.Password import Password
+from Backend.Repository.SQLiteRepository import SQLiteRepository
+from PaladinVaultLogic.Services.AuthService import AuthService
+from PaladinVaultLogic.Services.VaultService import VaultService
+
+
 class PaladinVaultController:
     def __init__(self):
-        self.derived_key = None
-        self.db_repository = None
-        self.key_file_path = None
+        self.auth_service = AuthService()
+        self.vault_service: VaultService | None = None
+        self.derived_key: bytes | None = None
+        self.db_repository: SQLiteRepository | None = None
+        self.key_file_path: str | None = None
+        self.db_path: str | None = None
 
-    def login(self, master_password: str, key_file_path: str) -> bool:
-        """
-        Authenticates the user using the master password and key file.
-        Initializes the database repository upon successful authentication.
+    def login(self, master_password: str, key_file_path: str, db_path: str | None = None) -> bool:
+        derived_key, resolved_key_path = self.auth_service.authenticate(master_password, key_file_path)
+        self.derived_key = derived_key
+        self.key_file_path = resolved_key_path
+        self.initialize_repository(db_path=db_path)
+        return True
 
-        Args:
-            master_password: The user's master password.
-            key_file_path: Path to the key file (e.g., salt.bin or vault.key).
+    def create_new_vault(
+        self,
+        master_password: str,
+        key_file_path: str,
+        db_path: str | None = None,
+        use_usb_key: bool = False,
+        overwrite_existing: bool = False,
+    ) -> bool:
+        if use_usb_key and not self._is_path_on_removable(key_file_path):
+            raise InvalidUSBPathException("USB key path must be located on removable media.")
 
-        Returns:
-            True if login is successful, False otherwise.
+        resolved_db_path = self._resolve_db_path(db_path)
 
-        Raises:
-            KeyFileNotFoundException: If the key file is not found.
-            InvalidPasswordException: If the master password is incorrect.
-            Exception: For other potential errors during key loading or derivation.
-        """
-        if not os.path.exists(key_file_path):
-            raise KeyFileNotFoundException(f"Key file not found at: {key_file_path}")
+        if os.path.exists(key_file_path) and not overwrite_existing:
+            raise VaultAlreadyExistsException(f"Key file already exists at: {os.path.abspath(key_file_path)}")
+        if os.path.exists(resolved_db_path) and not overwrite_existing:
+            raise VaultAlreadyExistsException(f"Database already exists at: {resolved_db_path}")
 
-        try:
-            # 1. Load the key and salt from the key file
-            loaded_key_data, salt = cp.load_key(key_file_path)
+        if overwrite_existing and os.path.exists(resolved_db_path):
+            os.remove(resolved_db_path)
 
-            # 2. Verify the master password against the loaded key (which is actually a hash) and salt
-            # cp.verify_key internally re-derives the key from master_password and salt,
-            # then compares it with loaded_key_data.
-            if not cp.verify_key(input=master_password, key=loaded_key_data, salt=salt):
-                # This path should ideally be caught by verify_key raising InvalidPasswordException
-                raise InvalidPasswordException("Master password verification failed.")
+        derived_key, resolved_key_path = self.auth_service.create_vault(master_password, key_file_path)
+        self.derived_key = derived_key
+        self.key_file_path = resolved_key_path
+        self.initialize_repository(db_path=resolved_db_path)
+        return True
 
-            # 3. If verification is successful, derive the actual encryption key for database operations
-            # This derived key is what will be used for encrypting/decrypting data in the database.
-            self.derived_key, _ = cp.derive_key(input=master_password, salt=salt) # Use the same salt
-
-            # 4. (Optional but recommended) Initialize SQLiteRepository here if login is successful
-            # self.initialize_repository() # You'll need to decide where your DB file is stored.
-            self.key_file_path=key_file_path
-            print("Login successful. Encryption key derived.")
-
-            self.initialize_repository()
-
-            return True
-
-        except InvalidPasswordException:
-            # Re-raise to be caught by the UI
-            raise
-        except FileNotFoundError: # Should be caught by the initial os.path.exists check
-            raise KeyFileNotFoundException(f"Key file not found: {key_file_path}")
-        except Exception as e:
-            # Catch-all for other potential errors during crypto operations
-            print(f"An unexpected error occurred during login: {e}")
-            raise Exception(f"Login process failed: {e}")
-
-
-    def initialize_repository(self):
-        """
-        Initializes the SQLiteRepository with the derived key.
-        This should be called after a successful login.
-        """
+    def initialize_repository(self, db_path: str | None = None):
         if not self.derived_key:
             raise Exception("Derived key is not available. Login must be successful first.")
 
-        self.db_repository = SQLiteRepository(key=self.derived_key)
-        print(f"Database repository initialized with path: {self.db_repository.get_db_path()}")
-        # You might want to create tables if they don't exist upon initialization
-        # self.db_repository.create_tables_if_not_exist() # Assuming such a method exists in SQLiteRepository
-        self.db_repository.initializeDB()
+        self.db_path = self._resolve_db_path(db_path)
+        self.db_repository = SQLiteRepository(key=self.derived_key, maindb_path=self.db_path)
+        self.vault_service = VaultService(
+            repository=self.db_repository,
+            derived_key=self.derived_key,
+            key_file_path=self.key_file_path or "",
+        )
+
+    def _resolve_db_path(self, db_path: str | None) -> str:
+        if db_path and db_path.strip():
+            return os.path.abspath(db_path)
+        return SQLiteRepository.resolve_default_db_path()
+
+    def _is_path_on_removable(self, path: str) -> bool:
+        abs_path = os.path.abspath(path)
+        for part in psutil.disk_partitions(all=False):
+            if os.name == "nt":
+                if "removable" not in part.opts.lower():
+                    continue
+            elif not (part.mountpoint.startswith("/media") or part.mountpoint.startswith("/run/media")):
+                continue
+
+            mountpoint = os.path.abspath(part.mountpoint)
+            if os.name == "nt":
+                if abs_path.lower().startswith(mountpoint.lower()):
+                    return True
+            elif abs_path.startswith(mountpoint):
+                return True
+        return False
+
+    def _require_vault(self) -> VaultService:
+        if not self.vault_service:
+            raise Exception("Database repository not initialized.")
+        return self.vault_service
 
     def get_repository(self) -> SQLiteRepository | None:
-        """
-        Returns the initialized SQLiteRepository instance.
-        """
         return self.db_repository
 
-    # Add other methods here to interact with CryptoPaladin and SQLiteRepository
-    # For example:
-    # def add_password_entry(...):
-    #     if not self.db_repository:
-    #         raise Exception("Repository not initialized.")
-    #     # ... encryption logic ...
-    #     self.db_repository.create_password_entry(...)
+    def add_password_entry_controller(
+        self,
+        service: str,
+        username: str,
+        email: str | None,
+        password: str,
+        link: str | None,
+        category: str | None,
+        note: str | None,
+    ) -> Password:
+        return self._require_vault().add_password_entry(
+            service=service,
+            username=username,
+            email=email,
+            password=password,
+            link=link,
+            category=category,
+            note=note,
+        )
 
-    # def get_all_passwords_decrypted(...):
-    #     if not self.db_repository:
-    #         raise Exception("Repository not initialized.")
-    #     encrypted_entries = self.db_repository.get_all_passwords()
-    #     decrypted_entries = []
-    #     for entry in encrypted_entries:
-    #         # ... decryption logic using self.derived_key ...
-    #         decrypted_entries.append(decrypted_entry)
-    #     return decrypted_entries
+    def get_passwords(
+        self,
+        page: int | None = None,
+        size: int | None = None,
+        sort_by: str = "pid",
+        sort_dir: str = "desc",
+        service: str | None = None,
+        category: str | None = None,
+    ) -> list[Password]:
+        return self._require_vault().list_passwords(
+            page=page,
+            size=size,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            service=service,
+            category=category,
+        )
 
-    def add_password_entry_controller(self, service: str, username: str, email: str | None, password: str,
-                                      link: str | None, category: str | None, note: str | None) -> None:
-        """
-        Adds a new password entry to the database via the repository.
-        Assumes password is already encrypted.
-        """
-        if not self.db_repository:
-            raise Exception("Database repository not initialized. Cannot add entry.")
+    def get_passwords_paginated(
+        self,
+        page: int,
+        size: int,
+        sort_by: str = "pid",
+        sort_dir: str = "desc",
+        service: str | None = None,
+        category: str | None = None,
+    ) -> tuple[list[Password], int]:
+        vault = self._require_vault()
+        items = vault.list_passwords(
+            page=page,
+            size=size,
+            sort_by=sort_by,
+            sort_dir=sort_dir,
+            service=service,
+            category=category,
+        )
+        total = vault.count_passwords(service=service, category=category)
+        return items, total
 
-        try:
-            enc_nonce, enc_ciphertext, enc_tag = cp.encrypt(password.encode('utf-8'), self.derived_key)
-            self.db_repository.create_password_entry(
-                password_entity=Password(
-                    service=service,
-                    username=username,
-                    email=email,
-                    password=enc_ciphertext, # This is the encrypted password
-                    nonce=enc_nonce,
-                    tag=enc_tag,
-                    link=link,
-                    category=category,
-                    note=note
-                )
-            )
-            print(f"Controller: Successfully added entry for service '{service}' to the database.")
-        except Exception as e:
-            print(f"Controller: Error adding password entry for service '{service}': {e}")
-            # Re-raise the exception to be handled by the UI if needed,
-            # or handle it more gracefully here (e.g., logging).
-            raise Exception(f"Failed to add password entry in controller: {e}")
+    def get_password_by_id(self, pid: int) -> Password | None:
+        return self._require_vault().get_password_by_id(pid)
 
-    def get_passwords(self, page:int|None=None, size:int|None=None)->list[Password]:
-        try:
-            return self.db_repository.get_all_passwords()
-        except Exception as ex:
-            print(f"Exception occured while trying to retrieve password {str(ex)}")
+    def get_passwords_by_service(self, service: str) -> list[Password]:
+        return self._require_vault().get_passwords_by_service(service)
 
-    def backup_vault(self, backup_path:str|None = None):
-        try:
-            if not backup_path:
-                # Value None
-                kf = Path(self.key_file_path)
-                if kf.is_file():
-                    parent_dir = kf.parent
-                    backup_path = parent_dir/"PaladinVault_Backup.bin"
-                    
-                
-            self.db_repository.backup(backup_path=backup_path)
-        except Exception as ex:
-            raise Exception(f"Failed backing up the vault")
+    def decrypt_password(self, password_entity: Password) -> str:
+        return self._require_vault().decrypt_password(password_entity)
 
-if __name__ == '__main__':
-    # Example Usage (for testing purposes)
-    controller = PaladinVaultController()
+    def update_password_entry_controller(
+        self,
+        pid: int,
+        service: str | None = None,
+        username: str | None = None,
+        email: str | None = None,
+        password: str | None = None,
+        link: str | None = None,
+        category: str | None = None,
+        note: str | None = None,
+    ) -> Password | None:
+        return self._require_vault().update_password_entry(
+            pid=pid,
+            service=service,
+            username=username,
+            email=email,
+            password=password,
+            link=link,
+            category=category,
+            note=note,
+        )
 
-    # --- You NEED to create a dummy key file first using CryptoPaladin.generate_key and save_key ---
-    # Example:
-    # from Backend.CryptoUtils import CryptoPaladin as cp
-    # password = "testpassword"
-    # key, salt = cp.generate_key(password)
-    # cp.save_key(key, salt, "dummy_key.bin") # Saves H(password||salt) and salt
-    # print("Dummy key file created as dummy_key.bin")
-    # --- ---
+    def delete_password_entry_controller(self, pid: int) -> bool:
+        return self._require_vault().delete_password_entry(pid)
 
-    DUMMY_KEY_FILE = r"D:\MyFiles\side_projects\PythonPassManager\testdir\dummy_key.bin"
-    DUMMY_DB_FILE = r"D:\MyFiles\side_projects\PythonPassManager\testdir\dummy_Passwords.db"
+    def backup_vault(self, backup_path: str | None = None):
+        self._require_vault().backup_vault(backup_path)
 
-    password = "test"
-    generate_result = cp.generate_key(password)
-    print("Key: ",generate_result[0])
-    print("Salt: ",generate_result[1])
+    def restore_vault(self, backup_path: str):
+        self._require_vault().restore_vault(backup_path)
 
-    cp.save_key(generate_result[0],generate_result[1],DUMMY_KEY_FILE)
+    def logout(self) -> None:
+        if self.vault_service:
+            try:
+                self.vault_service.close()
+            except Exception:
+                pass
 
-    if not os.path.exists(DUMMY_KEY_FILE):
-        print(f"Error: Dummy key file '{DUMMY_KEY_FILE}' not found.")
-        print("Please create it first (see commented out code above).")
-    else:
-        try:
-            print(f"Attempting login with password 'testpassword' and key file '{DUMMY_KEY_FILE}'...")
-            if controller.login("test", DUMMY_KEY_FILE):
-                print("Controller login successful.")
-
-                # Initialize repository
-                controller.initialize_repository()
-                repo = controller.get_repository()
-                if repo:
-                    print(f"Repository ready for operations on {DUMMY_DB_FILE}.")
-                    # Further operations e.g. repo.create_password_entry(...)
-                else:
-                    print("Failed to get repository.")
-            else:
-                # This case should ideally not be reached if exceptions are handled correctly
-                print("Controller login failed (unexpected).")
-
-        except KeyFileNotFoundException as e:
-            print(f"Login Error: {e}")
-        except InvalidPasswordException as e:
-            print(f"Login Error: {e}")
-        except Exception as e:
-            print(f"An unexpected error occurred: {e}")
+        self.vault_service = None
+        self.db_repository = None
+        self.derived_key = None
+        self.key_file_path = None
+        self.db_path = None
